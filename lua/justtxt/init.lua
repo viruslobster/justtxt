@@ -73,32 +73,13 @@ function run_block(block_start, block_end)
     f:close()
     os.execute("chmod +x "..tmpname)
     local handle = io.popen(tmpname.." 2>&1")
-    local out_line = block_end + 1
-    vim.api.nvim_buf_set_lines(
-         buf, out_line, out_line, true --[[strict]], {OUT_BLOCK_START}
-    )
-    out_line = out_line + 1
-    vim.api.nvim_command('redraw')
-    local result = {OUT_BLOCK_START}
-    repeat
+    return function()
         local line = handle:read("*l")
-        if line ~= nil then
-            table.insert(result, line)
-            vim.api.nvim_buf_set_lines(
-                 buf, out_line, out_line, true --[[strict]], {line}
-            )
-            out_line = out_line + 1
-            vim.api.nvim_command('redraw')
+        if line == nil then
+            handle:close()
         end
-    until line == nil
-    table.insert(result, OUT_BLOCK_END)
-    vim.api.nvim_buf_set_lines(
-         buf, out_line, out_line, true --[[strict]], {OUT_BLOCK_END}
-    )
-    vim.api.nvim_command('redraw')
-
-    handle:close()
-    return result
+        return line
+    end
 end
 
 function str(val)
@@ -120,15 +101,22 @@ function M.run()
         )
     end
 
-    result = run_block(run_block_start, run_block_end)
-    --vim.api.nvim_buf_set_lines(
-    --     buf, run_block_end+1, run_block_end+1, true --[[strict]], result
-    --)
-
-
-
+    local out_line = run_block_end + 1
+    vim.api.nvim_buf_set_lines(
+         buf, out_line, out_line, true --[[strict]], {OUT_BLOCK_START}
+    )
+    out_line = out_line + 1
+    for line in run_block(run_block_start, run_block_end) do
+        vim.api.nvim_buf_set_lines(
+             buf, out_line, out_line, true --[[strict]], {line}
+        )
+        vim.api.nvim_command('redraw')
+        out_line = out_line + 1
+    end
+    vim.api.nvim_buf_set_lines(
+         buf, out_line, out_line, true --[[strict]], {OUT_BLOCK_END}
+    )
     -- print("run block: ["..str(run_block_start)..", "..str(run_block_end).."]")
     -- print("out block: ["..str(out_block_start)..", "..str(out_block_end).."]")
-    --vim.api.nvim_command('redraw')
 end
 return M
