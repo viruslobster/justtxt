@@ -123,14 +123,21 @@ function M.run()
     local handle, pid = vim.loop.spawn("bash", {
         stdio = {stdin, stdout, stderr}
     }, function(code, signal) -- on exit
+        stderr:read_stop()
+        stderr:shutdown()
         stdout:read_stop()
+        stdout:shutdown()
     end)
 
     M.kill = function(signum)
         os.execute("echo ran kill >> /tmp/out")
         -- vim.loop.kill(pid, signum)
         handle:kill(signum)
-        -- handle:close()
+        handle:close()
+        stderr:read_stop()
+        stderr:shutdown()
+        stdout:read_stop()
+        stdout:shutdown()
     end
 
     vim.api.nvim_buf_set_lines(
@@ -155,6 +162,21 @@ function M.run()
                 vim.api.nvim_buf_set_lines(
                      buf.id, out_line, out_line, true, {OUT_BLOCK_END}
                 )
+            end)
+        end
+    end)
+
+    stderr:read_start(function(err, data)
+        assert(not err, err)
+        if data then
+            vim.schedule(function()
+                for line in data:gmatch("([^\n]*)\n") do
+                    out_line = out_line + 1
+                    vim.api.nvim_buf_set_lines(
+                        buf.id, out_line, out_line, true, {line}
+                    )
+                end
+                vim.api.nvim_command('redraw')
             end)
         end
     end)
