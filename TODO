@@ -1,0 +1,4 @@
+- executing at the start/end of block works
+- don't include end of block comment in file
+- !!
+- bash sessions
