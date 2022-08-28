@@ -2,7 +2,6 @@ local M = {}
 
 local EXE_BLOCK_START = "^#![^!]*$"
 local EXE_BLOCK_END = "^#%$"
-local OUT_BLOCK_START = "--------[out]---"
 local OUT_BLOCK_END = "--------[end]---"
 
 function get_line(self, i)
@@ -66,21 +65,20 @@ function find_run_block(buf)
     return block_start, block_end
 end
 
-function get_out_block(buf, block_start, block_end)
-    local start = block_end + 1
+function get_out_block(buf, exe_block_end)
+    local start = exe_block_end + 1
     if start >= buf.len then
         return nil, nil
     end
 
-    local first_line = buf:get_line(start)
-    if first_line ~= OUT_BLOCK_START then
-        return nil, nil
-    end
-
-    for finish = start+1, buf.len do
+    for finish = start, buf.len do
         local line = buf:get_line(finish)
         if line == OUT_BLOCK_END then
             return start, finish
+        end
+
+        if line:match(EXE_BLOCK_START) then
+            break -- we've gone too far
         end
     end
     return start, nil
@@ -130,7 +128,7 @@ function M.run()
     local buf = buffer_data();
     exe_start, exe_end = find_run_block(buf)
     -- print("run block: ["..str(exe_start)..", "..str(exe_end).."]")
-    out_start, out_end = get_out_block(buf, exe_start, exe_end)
+    out_start, out_end = get_out_block(buf, exe_end)
     -- print("out block: ["..str(out_start)..", "..str(out_end).."]")
 
     -- clear out block
@@ -161,7 +159,6 @@ function M.run()
     end
 
     local next_line = counter(exe_end + 1)
-    buf:append_line(next_line(), OUT_BLOCK_START)
 
     local on_update = function(data)
         vim.schedule(function()
