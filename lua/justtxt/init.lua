@@ -71,7 +71,7 @@ function get_out_block(buf, exe_block_end)
         return nil, nil
     end
 
-    for finish = start, buf.len do
+    for finish = start, buf.len-1 do
         local line = buf:get_line(finish)
         if line == OUT_BLOCK_END then
             return start, finish
