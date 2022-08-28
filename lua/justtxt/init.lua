@@ -1,7 +1,7 @@
 local M = {}
 
-local EXE_BLOCK_START = "^#![^!]?"
-local EXE_BLOCK_END = "^#/>"
+local EXE_BLOCK_START = "^#![^!]*$"
+local EXE_BLOCK_END = "^#%$"
 local OUT_BLOCK_START = "--------[out]---"
 local OUT_BLOCK_END = "--------[end]---"
 
