@@ -2,7 +2,7 @@ local M = {}
 
 local EXE_BLOCK_START = "^#![^!]*$"
 local EXE_BLOCK_END = "^#%$"
-local OUT_BLOCK_END = "--------[end]---"
+local OUT_BLOCK_END = "#~"
 
 function get_line(self, i)
     return vim.api.nvim_buf_get_lines(self.id, i, i+1, true)[1]
@@ -158,12 +158,16 @@ function M.run()
         M.kill = function() end
     end
 
-    local next_line = counter(exe_end + 1)
+    buf:append_line(exe_end+1, OUT_BLOCK_END)
+    local ns = vim.api.nvim_create_namespace("justtxt")
+    local mark = vim.api.nvim_buf_set_extmark(buf.id, ns, exe_end+1, 0, {})
 
     local on_update = function(data)
         vim.schedule(function()
+            local i = vim.api.nvim_buf_get_extmark_by_id(buf.id, ns, mark, {})[1]
             for line in data:gmatch("([^\n]*)\n") do
-                buf:append_line(next_line(), line)
+                buf:append_line(i, line)
+                i = i + 1
             end
             vim.api.nvim_command('redraw')
         end)
@@ -174,9 +178,6 @@ function M.run()
         if data then
             on_update(data)
         else
-            vim.schedule(function()
-                buf:append_line(next_line(), OUT_BLOCK_END)
-            end)
             stdout:close()
         end
     end)
