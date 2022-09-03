@@ -34,10 +34,14 @@ function buffer_data()
         append_line = append_line,
     }
 end
-
 function find_run_cell(buf)
+    local line = buf:get_line(buf.cursor_y)
+    if line:match("^!") then
+        return buf.cursor_y, buf.cursor_y
+    end
+
     -- search upwards for start of cell
-    local cell_start = buf.cursor_y
+    local cell_start = nil
     for i = buf.cursor_y, 0, -1 do
         local line = buf:get_line(i)
         if line:match(EXE_CELL_START) then
@@ -50,7 +54,7 @@ function find_run_cell(buf)
     end
     
     -- search downwards for end of cell
-    local cell_end = buf.cursor_y
+    local cell_end = nil
     for i = buf.cursor_y, buf.len - 1 do
         local line = buf:get_line(i)
         if line:match(EXE_CELL_END) then
@@ -148,6 +152,12 @@ end
 function M.run()
     local buf = buffer_data();
     exe_start, exe_end = find_run_cell(buf)
+    if exe_start == nil and exe_end == nil then
+        -- no run cell found, assume we want to run the current line
+        exe_start = buf.cursor_y
+        exe_end = buf.cursor_y
+    end
+
     -- print("run cell: ["..str(exe_start)..", "..str(exe_end).."]")
     out_start, out_end = get_out_cell(buf, exe_end)
     -- print("out cell: ["..str(out_start)..", "..str(out_end).."]")
