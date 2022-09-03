@@ -1,8 +1,8 @@
 local M = {}
 
-local EXE_BLOCK_START = "^#![^!]*$"
-local EXE_BLOCK_END = "^#%$"
-local OUT_BLOCK_END = "#~"
+local EXE_CELL_START = "^#![^!]*$"
+local EXE_CELL_END = "^#%$"
+local OUT_CELL_END = "#~"
 
 function get_line(self, i)
     return vim.api.nvim_buf_get_lines(self.id, i, i+1, true)[1]
@@ -35,50 +35,50 @@ function buffer_data()
     }
 end
 
-function find_run_block(buf)
-    -- search upwards for start of block
-    local block_start = buf.cursor_y
+function find_run_cell(buf)
+    -- search upwards for start of cell
+    local cell_start = buf.cursor_y
     for i = buf.cursor_y, 0, -1 do
         local line = buf:get_line(i)
-        if line:match(EXE_BLOCK_START) then
-            block_start = i
+        if line:match(EXE_CELL_START) then
+            cell_start = i
             break
         end
-        if line:match(EXE_BLOCK_END) and i ~= buf.cursor_y then
+        if line:match(EXE_CELL_END) and i ~= buf.cursor_y then
             break -- we've gone too far
         end
     end
     
-    -- search downwards for end of block
-    local block_end = buf.cursor_y
+    -- search downwards for end of cell
+    local cell_end = buf.cursor_y
     for i = buf.cursor_y, buf.len - 1 do
         local line = buf:get_line(i)
-        if line:match(EXE_BLOCK_END) then
-            block_end = i
+        if line:match(EXE_CELL_END) then
+            cell_end = i
             break
         end
-        if line:match(EXE_BLOCK_START) and i ~= buf.cursor_y then
+        if line:match(EXE_CELL_START) and i ~= buf.cursor_y then
             break -- we've gone too far
         end
     end
 
-    return block_start, block_end
+    return cell_start, cell_end
 end
 
-function get_out_block(buf, exe_block_end)
-    local start = exe_block_end + 1
+function get_out_cell(buf, exe_cell_end)
+    local start = exe_cell_end + 1
     if start >= buf.len then
         return nil, nil
     end
 
     for finish = start, buf.len-1 do
         local line = buf:get_line(finish)
-        if line == OUT_BLOCK_END then
+        if line == OUT_CELL_END then
             return start, finish
         end
 
-        if line:match(EXE_BLOCK_START) then
-            print('exe_block_start')
+        if line:match(EXE_CELL_START) then
+            print('exe_cell_start')
             break -- we've gone too far
         end
 
@@ -90,18 +90,18 @@ function get_out_block(buf, exe_block_end)
     return start, nil
 end
 
-function create_cmd(buf, block_start, block_end)
-    local lines = buf:get_lines(block_start, block_end+1)
+function create_cmd(buf, cell_start, cell_end)
+    local lines = buf:get_lines(cell_start, cell_end+1)
 
-    if block_start == block_end then
+    if cell_start == cell_end then
         lines[1] = lines[1]:gsub("^%s*!?%s*", "")
     end
 
-    -- multiline blocks can specify a !! command on the second line
+    -- multiline cells can specify a !! command on the second line
     -- e.g. # !! < input | grep result | wc -l
     local bangbang = "!!"
-    if block_start ~= block_end then
-        local line = buf:get_line(block_start+1)
+    if cell_start ~= cell_end then
+        local line = buf:get_line(cell_start+1)
         if line:match("^#.*!!") then bangbang = line:sub(2) end
     end
 
@@ -126,25 +126,35 @@ function M.kill()
     -- actual implementation is set each time run is called
 end
 
-function fmt_run_block(buf, exe_start, exe_end)
+function fmt_run_cell(buf, exe_start, exe_end)
     if exe_start ~= exe_end then
-        return -- only fmt rules for one line blocks right now
+        return -- only fmt rules for one line cells right now
     end
     local line = buf:get_line(exe_start)
     local suffix = line:gsub("^%s*!?%s*", "")
     buf:set_lines(exe_start, exe_start+1, {"! "..suffix})
 end
 
+function M.clear()
+    local buf = buffer_data();
+    exe_start, exe_end = find_run_cell(buf)
+    if exe_start and exe_end then
+        print(exe_start)
+        print(exe_end)
+        print("within run cell")
+    end
+end
+
 function M.run()
     local buf = buffer_data();
-    exe_start, exe_end = find_run_block(buf)
-    -- print("run block: ["..str(exe_start)..", "..str(exe_end).."]")
-    out_start, out_end = get_out_block(buf, exe_end)
-    -- print("out block: ["..str(out_start)..", "..str(out_end).."]")
+    exe_start, exe_end = find_run_cell(buf)
+    -- print("run cell: ["..str(exe_start)..", "..str(exe_end).."]")
+    out_start, out_end = get_out_cell(buf, exe_end)
+    -- print("out cell: ["..str(out_start)..", "..str(out_end).."]")
      
-    fmt_run_block(buf, exe_start, exe_end)
+    fmt_run_cell(buf, exe_start, exe_end)
 
-    -- clear out block
+    -- clear out cell
     if out_start ~= nil and out_end ~= nil then
         buf:set_lines(out_start, out_end+1, {})
     end
@@ -171,7 +181,7 @@ function M.run()
         M.kill = function() end
     end
 
-    buf:append_line(exe_end+1, OUT_BLOCK_END)
+    buf:append_line(exe_end+1, OUT_CELL_END)
     local ns = vim.api.nvim_create_namespace("justtxt")
     local mark = vim.api.nvim_buf_set_extmark(buf.id, ns, exe_end+1, 0, {})
 
@@ -206,7 +216,6 @@ function M.run()
 
     stdin:write(cmd)
     stdin:shutdown()
-
 end
 
 return M
