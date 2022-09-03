@@ -78,6 +78,12 @@ function get_out_block(buf, exe_block_end)
         end
 
         if line:match(EXE_BLOCK_START) then
+            print('exe_block_start')
+            break -- we've gone too far
+        end
+
+        if  line:match("^!") then
+            print('prefix')
             break -- we've gone too far
         end
     end
@@ -86,6 +92,10 @@ end
 
 function create_cmd(buf, block_start, block_end)
     local lines = buf:get_lines(block_start, block_end+1)
+
+    if block_start == block_end then
+        lines[1] = lines[1]:gsub("^%s*!?%s*", "")
+    end
 
     -- multiline blocks can specify a !! command on the second line
     -- e.g. # !! < input | grep result | wc -l
@@ -116,12 +126,13 @@ function M.kill()
     -- actual implementation is set each time run is called
 end
 
-function counter(i)
-    return function()
-        local buf = i
-        i = i + 1
-        return buf
+function fmt_run_block(buf, exe_start, exe_end)
+    if exe_start ~= exe_end then
+        return -- only fmt rules for one line blocks right now
     end
+    local line = buf:get_line(exe_start)
+    local suffix = line:gsub("^%s*!?%s*", "")
+    buf:set_lines(exe_start, exe_start+1, {"! "..suffix})
 end
 
 function M.run()
@@ -130,6 +141,8 @@ function M.run()
     -- print("run block: ["..str(exe_start)..", "..str(exe_end).."]")
     out_start, out_end = get_out_block(buf, exe_end)
     -- print("out block: ["..str(out_start)..", "..str(out_end).."]")
+     
+    fmt_run_block(buf, exe_start, exe_end)
 
     -- clear out block
     if out_start ~= nil and out_end ~= nil then
