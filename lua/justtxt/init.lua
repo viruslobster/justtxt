@@ -4,6 +4,8 @@ local EXE_CELL_START = "^#![^!]*$"
 local EXE_CELL_END = "^#%$"
 local OUT_CELL_END = "#~"
 
+local NVIM_JUSTTXT_NS = vim.api.nvim_create_namespace("justtxt")
+
 function get_line(self, i)
     return vim.api.nvim_buf_get_lines(self.id, i, i+1, true)[1]
 end
@@ -77,7 +79,7 @@ function get_out_cell(buf, exe_cell_end)
 
     for finish = start, buf.len-1 do
         local line = buf:get_line(finish)
-        if line == OUT_CELL_END then
+        if line:match(OUT_CELL_END) then
             return start, finish
         end
 
@@ -171,6 +173,11 @@ function M.run()
 
     local cmd = create_cmd(buf, exe_start, exe_end)
 
+    buf:append_line(exe_end+1, OUT_CELL_END.." RUNNING")
+    local mark = vim.api.nvim_buf_set_extmark(
+        buf.id, NVIM_JUSTTXT_NS, exe_end+1, 0, {}
+    )
+
     local stdin = vim.loop.new_pipe(false)
     local stdout = vim.loop.new_pipe(false)
     local stderr = vim.loop.new_pipe(false)
@@ -179,25 +186,40 @@ function M.run()
 
     handle, pid = vim.loop.spawn("bash", {
         stdio = {stdin, stdout, stderr},
-        detached = true,
+
+        -- make bash the process group leader
+        detached = true, 
     }, function(code, signal) -- on exit
         handle:close()
         M.kill = function() end
+
+        vim.schedule(function()
+            local i = vim.api.nvim_buf_get_extmark_by_id(
+                buf.id, NVIM_JUSTTXT_NS, mark, {}
+            )[1]
+
+            buf:set_lines(i, i+1, { OUT_CELL_END })
+        end)
     end)
 
     M.kill = function(signum)
         os.execute("kill -2 -"..pid)
         handle:close()
         M.kill = function() end
-    end
+        vim.schedule(function()
+            local i = vim.api.nvim_buf_get_extmark_by_id(
+                buf.id, NVIM_JUSTTXT_NS, mark, {}
+            )[1]
 
-    buf:append_line(exe_end+1, OUT_CELL_END)
-    local ns = vim.api.nvim_create_namespace("justtxt")
-    local mark = vim.api.nvim_buf_set_extmark(buf.id, ns, exe_end+1, 0, {})
+            buf:set_lines(i, i+1, { OUT_CELL_END.." SIGINT" })
+        end)
+    end
 
     local on_update = function(data)
         vim.schedule(function()
-            local i = vim.api.nvim_buf_get_extmark_by_id(buf.id, ns, mark, {})[1]
+            local i = vim.api.nvim_buf_get_extmark_by_id(
+                buf.id, NVIM_JUSTTXT_NS, mark, {}
+            )[1]
             for line in data:gmatch("([^\n]*)\n") do
                 buf:append_line(i, line)
                 i = i + 1
