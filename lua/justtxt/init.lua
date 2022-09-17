@@ -4,38 +4,106 @@ local EXE_CELL_START = "^#![^!]*$"
 local EXE_CELL_END = "^#%$"
 local OUT_CELL_END = "#~"
 
-local NVIM_JUSTTXT_NS = vim.api.nvim_create_namespace("justtxt")
+CellIndex = {}
+CellIndex.__index = CellIndex
 
-function get_line(self, i)
+function CellIndex:new()
+    o = {}
+    setmetatable(o, self)
+    
+    o.cell_by_pid = {}
+    return o
+end
+
+function CellIndex:get(pid)
+    return self.cell_by_pid[pid]
+end
+
+function CellIndex:set(pid, cell)
+    self.cell_by_pid[pid] = cell
+end
+
+function CellIndex:del(pid)
+    local c = self.cell_by_pid[pid]
+    self.cell_by_pid[pid] = nil
+    return c
+end
+
+function CellIndex:selected_pid(buf, line)
+    for pid, cell in pairs(self.cell_by_pid) do
+        local start_line = buf:get_extmark(cell.start_mark)
+        local end_line = buf:get_extmark(cell.end_mark)
+
+        if line >= start_line and line <= end_line then
+            return pid, cell
+        end
+    end
+    return nil, nil
+end
+
+local running_cells = CellIndex:new()
+
+Buffer = {
+    NVIM_JUSTTXT_NS = vim.api.nvim_create_namespace("justtxt")
+}
+Buffer.__index = Buffer
+
+function Buffer:new()
+    local o = {}
+    setmetatable(o, Buffer)
+
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    self.id = vim.api.nvim_get_current_buf()
+    self.len = vim.api.nvim_buf_line_count(self.id)
+    self.cursor_y = cursor[1] - 1
+    self.cursor_x = cursor[2]
+    return o
+end
+
+function Buffer:get_line(i)
     return vim.api.nvim_buf_get_lines(self.id, i, i+1, true)[1]
 end
 
-function get_lines(self, i, j)
+function Buffer:get_lines(i, j)
     return vim.api.nvim_buf_get_lines(self.id, i, j, true)
 end
 
-function set_lines(self, i, j, lines)
+function Buffer:set_lines(i, j, lines)
     vim.api.nvim_buf_set_lines(self.id, i, j, true, lines)
 end
 
-function append_line(self, i, line)
+function Buffer:append_line(i, line)
     vim.api.nvim_buf_set_lines(self.id, i, i, true, {line})
 end 
 
-function buffer_data()
-    local id = vim.api.nvim_get_current_buf()
-    local cursor = vim.api.nvim_win_get_cursor(0)
+function Buffer:set_extmark(line)
+    return vim.api.nvim_buf_set_extmark(
+        self.id, self.NVIM_JUSTTXT_NS, line, 0, {}
+    )
+end
+
+function Buffer:get_extmark(id)
+    local line = vim.api.nvim_buf_get_extmark_by_id(
+        self.id, self.NVIM_JUSTTXT_NS, id, {}
+    )[1]
+    return line
+end
+
+function Buffer:del_extmark(id)
+    vim.api.nvim_buf_del_extmark(self.id, self.NVIM_JUSTTXT_NS, id)
+end
+
+function Buffer:redraw()
+    vim.api.nvim_command('redraw')
+end
+
+function cell(start_mark, end_mark)
     return {
-        id = id,
-        len = vim.api.nvim_buf_line_count(id),
-        cursor_y = cursor[1] - 1,
-        cursor_x = cursor[2],
-        get_line = get_line,
-        get_lines = get_lines,
-        set_lines = set_lines,
-        append_line = append_line,
+        start_mark = start_mark,
+        end_mark = end_mark, 
     }
 end
+
 function find_run_cell(buf)
     local line = buf:get_line(buf.cursor_y)
     if line:match("^!") then
@@ -84,12 +152,10 @@ function get_out_cell(buf, exe_cell_end)
         end
 
         if line:match(EXE_CELL_START) then
-            print('exe_cell_start')
             break -- we've gone too far
         end
 
         if  line:match("^!") then
-            print('prefix')
             break -- we've gone too far
         end
     end
@@ -129,7 +195,19 @@ function str(val)
 end
 
 function M.kill()
-    -- actual implementation is set each time run is called
+    local buf = Buffer:new()
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local line = cursor[1] - 1
+    local pid, cell = running_cells:selected_pid(buf, line)
+    if pid == nil then
+        print("No cell selected")
+        return
+    end
+
+    os.execute("kill -2 -"..pid)
+    -- local i = buf:get_extmark(cell.end_mark)
+    -- buf:set_lines(i, i+1, { OUT_CELL_END.." Sent SIGINT" })
+    -- TODO process might not actually be done
 end
 
 function fmt_run_cell(buf, exe_start, exe_end)
@@ -145,14 +223,11 @@ function M.clear()
     local buf = buffer_data();
     exe_start, exe_end = find_run_cell(buf)
     if exe_start and exe_end then
-        print(exe_start)
-        print(exe_end)
-        print("within run cell")
     end
 end
 
 function M.run()
-    local buf = buffer_data();
+    local buf = Buffer:new()
     exe_start, exe_end = find_run_cell(buf)
     if exe_start == nil and exe_end == nil then
         -- no run cell found, assume we want to run the current line
@@ -173,10 +248,10 @@ function M.run()
 
     local cmd = create_cmd(buf, exe_start, exe_end)
 
+    local start_mark = buf:set_extmark(exe_start)
+
     buf:append_line(exe_end+1, OUT_CELL_END.." RUNNING")
-    local mark = vim.api.nvim_buf_set_extmark(
-        buf.id, NVIM_JUSTTXT_NS, exe_end+1, 0, {}
-    )
+    local end_mark = buf:set_extmark(exe_end+1)
 
     local stdin = vim.loop.new_pipe(false)
     local stdout = vim.loop.new_pipe(false)
@@ -186,45 +261,30 @@ function M.run()
 
     handle, pid = vim.loop.spawn("bash", {
         stdio = {stdin, stdout, stderr},
-
-        -- make bash the process group leader
-        detached = true, 
+        detached = true, -- make bash the process group leader
     }, function(code, signal) -- on exit
         handle:close()
-        M.kill = function() end
 
         vim.schedule(function()
-            local i = vim.api.nvim_buf_get_extmark_by_id(
-                buf.id, NVIM_JUSTTXT_NS, mark, {}
-            )[1]
-
+            local i = buf:get_extmark(end_mark)
             buf:set_lines(i, i+1, { OUT_CELL_END })
+
+            local c = running_cells:del(pid)
+            buf:del_extmark(c.start_mark)
+            buf:del_extmark(c.end_mark)
         end)
     end)
 
-    M.kill = function(signum)
-        os.execute("kill -2 -"..pid)
-        handle:close()
-        M.kill = function() end
-        vim.schedule(function()
-            local i = vim.api.nvim_buf_get_extmark_by_id(
-                buf.id, NVIM_JUSTTXT_NS, mark, {}
-            )[1]
-
-            buf:set_lines(i, i+1, { OUT_CELL_END.." SIGINT" })
-        end)
-    end
+    running_cells:set(pid, cell(start_mark, end_mark))
 
     local on_update = function(data)
         vim.schedule(function()
-            local i = vim.api.nvim_buf_get_extmark_by_id(
-                buf.id, NVIM_JUSTTXT_NS, mark, {}
-            )[1]
+            local i = buf:get_extmark(end_mark)
             for line in data:gmatch("([^\n]*)\n") do
                 buf:append_line(i, line)
                 i = i + 1
             end
-            vim.api.nvim_command('redraw')
+            buf:redraw()
         end)
     end
 
