@@ -1,4 +1,4 @@
-- executing at the start/end of block works
-- don't include end of block comment in file
-- !!
+- poll the running process status and check if it actually stopped
+- intercept buffer update events and stop it from deleting marked lines
 - bash sessions
+
